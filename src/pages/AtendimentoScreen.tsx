@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import {
   MessageSquare, Search, Clock, PlayCircle, CheckCircle, User, Phone,
-  ChevronDown, ChevronUp, MessagesSquare, Loader2, Calendar, Laptop, Frown
+  ChevronDown, ChevronUp, MessagesSquare, Loader2, Calendar, Laptop, Frown,
+  MessageCircle, Send, X
 } from 'lucide-react';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
@@ -45,6 +46,11 @@ const AtendimentoScreen: React.FC = () => {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [showScrollArrow, setShowScrollArrow] = useState(false);
   const [showScrollUpArrow, setShowScrollUpArrow] = useState(false);
+  
+  // WhatsApp Modal States
+  const [isResponseModalOpen, setIsResponseModalOpen] = useState(false);
+  const [responseText, setResponseText] = useState('');
+  const [isSendingResponse, setIsSendingResponse] = useState(false);
   const [pessoasMap, setPessoasMap] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -173,6 +179,34 @@ const AtendimentoScreen: React.FC = () => {
       setAtendimentos(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a));
     }
     setUpdatingId(null);
+  };
+
+  const handleSendMessage = async () => {
+    if (!responseText.trim() || !selectedWhatsapp) return;
+    
+    setIsSendingResponse(true);
+    try {
+      const response = await fetch('https://n8n.technocode.site/webhook/PauloDoVale-enviarMSN', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          whatsapp: selectedWhatsapp,
+          message: responseText.trim()
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha ao enviar mensagem');
+      }
+
+      setResponseText('');
+      setIsResponseModalOpen(false);
+    } catch (error) {
+      console.error("Erro ao enviar mensagem via webhook:", error);
+      alert('Ocorreu um erro ao enviar a resposta. Tente novamente.');
+    } finally {
+      setIsSendingResponse(false);
+    }
   };
 
   // ── Scroll Indicator ────────────────────────────────────────────────────
@@ -345,6 +379,13 @@ const AtendimentoScreen: React.FC = () => {
                      Acompanhe todas as interações e solicitações.
                    </p>
                  </div>
+                 <button
+                   onClick={() => setIsResponseModalOpen(true)}
+                   className="flex items-center gap-2 bg-[#25D366] hover:bg-[#1DA851] text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm"
+                 >
+                   <MessageCircle className="w-5 h-5" />
+                   Enviar resposta
+                 </button>
                </div>
 
                {/* Stats Row */}
@@ -495,6 +536,55 @@ const AtendimentoScreen: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Modal de Enviar Resposta (WhatsApp) */}
+      {isResponseModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-700 flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+              <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                <MessageCircle className="w-5 h-5 text-[#25D366]" />
+                Enviar resposta
+              </h3>
+              <button
+                onClick={() => setIsResponseModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Mensagem para {selectedWhatsapp ? (pessoasMap[selectedWhatsapp.replace(/\D/g, '')] || pessoasMap[selectedWhatsapp] || selectedWhatsapp) : ''}
+              </label>
+              <textarea
+                value={responseText}
+                onChange={(e) => setResponseText(e.target.value)}
+                placeholder="Digite a mensagem..."
+                className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-[#25D366] focus:border-transparent outline-none resize-none h-32 text-slate-900 dark:text-white"
+              />
+            </div>
+            
+            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
+              <button
+                onClick={() => setIsResponseModalOpen(false)}
+                className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSendMessage}
+                disabled={!responseText.trim() || isSendingResponse}
+                className="flex items-center gap-2 px-4 py-2 bg-[#25D366] hover:bg-[#1DA851] text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSendingResponse ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {isSendingResponse ? 'Enviando...' : 'Enviar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

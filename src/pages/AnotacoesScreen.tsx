@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, X, Search, Clock, CalendarDays, Edit2, Trash2, ChevronLeft, ChevronRight, StickyNote } from 'lucide-react';
+import { Plus, X, Search, Clock, CalendarDays, Edit2, Trash2, ChevronLeft, ChevronRight, StickyNote, AlertTriangle } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
   'recebido': 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400',
@@ -113,6 +113,7 @@ export default function AnotacoesScreen() {
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
   
   // Forms
   const [waNum, setWaNum] = useState('');
@@ -224,9 +225,18 @@ export default function AnotacoesScreen() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Excluir esta anotação?')) return;
-    await supabase.from('anotacoes').delete().eq('id', id);
+  const handleDelete = (id: string) => {
+    setNoteToDelete(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!noteToDelete) return;
+    try {
+      await supabase.from('anotacoes').delete().eq('id', noteToDelete);
+      setNoteToDelete(null);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleStatusChange = async (id: string, newStatus: string) => {
@@ -543,6 +553,37 @@ export default function AnotacoesScreen() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão */}
+      {noteToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-500" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">Excluir Anotação</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm">
+                Tem certeza que deseja excluir esta anotação? Esta ação não pode ser desfeita.
+              </p>
+            </div>
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 flex justify-center space-x-3">
+              <button
+                onClick={() => setNoteToDelete(null)}
+                className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Sim, Excluir
+              </button>
+            </div>
           </div>
         </div>
       )}

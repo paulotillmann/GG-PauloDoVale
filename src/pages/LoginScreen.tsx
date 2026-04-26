@@ -193,7 +193,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onRegister }) => {
               className="w-full max-w-[182px] object-contain opacity-70 hover:opacity-100 transition-opacity" 
             />
             <div className="text-[12px] text-black dark:text-white text-center leading-relaxed">
-              <p>Versão 0.1</p>
+              <p>Versão 1.0</p>
               <p>by Tillmann Tech Soluções</p>
               <p>Janeiro, 2026</p>
             </div>
