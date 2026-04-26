@@ -1,0 +1,5 @@
+{
+  "name": "Gestão Gabinete - Template",
+  "description": "Template reutilizável para portal de Gestão de Gabinete Parlamentar. Configure nome, logos, cores e credenciais via src/config/template.config.ts.",
+  "requestFramePermissions": []
+}
