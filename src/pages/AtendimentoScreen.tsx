@@ -18,6 +18,13 @@ export interface Atendimento {
   created_at: string;
 }
 
+export interface PessoaMapInfo {
+  id: string;
+  full_name: string;
+  phone: string;
+  atendimento_humano: boolean;
+}
+
 const STATUS_CONFIG = {
   'recebido':       { label: 'Recebido',       color: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300', dot: 'bg-slate-400', icon: Clock },
   'verificado':     { label: 'Verificado',     color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400', dot: 'bg-blue-500', icon: Search },
@@ -51,7 +58,7 @@ const AtendimentoScreen: React.FC = () => {
   const [isResponseModalOpen, setIsResponseModalOpen] = useState(false);
   const [responseText, setResponseText] = useState('');
   const [isSendingResponse, setIsSendingResponse] = useState(false);
-  const [pessoasMap, setPessoasMap] = useState<Record<string, string>>({});
+  const [pessoasMap, setPessoasMap] = useState<Record<string, PessoaMapInfo>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ── Fetch ───────────────────────────────────────────────────────────────
@@ -60,7 +67,7 @@ const AtendimentoScreen: React.FC = () => {
     
     const [atendRes, pessoasRes] = await Promise.all([
       supabase.from('atendimento').select('*').order('created_at', { ascending: false }),
-      supabase.from('pessoa').select('phone, full_name')
+      supabase.from('pessoa').select('id, phone, full_name, atendimento_humano')
     ]);
     
     if (atendRes.error) {
@@ -70,12 +77,12 @@ const AtendimentoScreen: React.FC = () => {
     }
 
     if (!pessoasRes.error && pessoasRes.data) {
-      const pMap: Record<string, string> = {};
+      const pMap: Record<string, PessoaMapInfo> = {};
       pessoasRes.data.forEach(p => {
         if (p.phone && p.full_name) {
           const clean = p.phone.replace(/\D/g, '');
-          pMap[clean] = p.full_name;
-          pMap[p.phone] = p.full_name;
+          pMap[clean] = p as PessoaMapInfo;
+          pMap[p.phone] = p as PessoaMapInfo;
         }
       });
       setPessoasMap(pMap);
@@ -299,7 +306,8 @@ const AtendimentoScreen: React.FC = () => {
             <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
               {contacts.map((contact) => {
                 const cleanPhone = contact.whatsapp.replace(/\D/g, '');
-                const displayName = pessoasMap[cleanPhone] || pessoasMap[contact.whatsapp] || contact.whatsapp;
+                const personInfo = pessoasMap[cleanPhone] || pessoasMap[contact.whatsapp];
+                const displayName = personInfo ? personInfo.full_name : contact.whatsapp;
                 
                 return (
                 <div 
@@ -318,7 +326,7 @@ const AtendimentoScreen: React.FC = () => {
                   
                   {/* Avatar simples gerado */}
                   <div className="h-10 w-10 shrink-0 bg-slate-200/50 dark:bg-slate-800/80 rounded-full flex items-center justify-center border border-slate-300 dark:border-slate-700/80 overflow-hidden">
-                    {(pessoasMap[cleanPhone] || pessoasMap[contact.whatsapp]) ? (
+                    {personInfo ? (
                       <img src={`https://api.dicebear.com/7.x/initials/svg?seed=${displayName}`} alt="Avatar" className="w-full h-full opacity-80" />
                     ) : (
                       <Frown className="h-5 w-5 text-slate-400 dark:text-slate-500 opacity-60" strokeWidth={1.5} />
@@ -374,7 +382,7 @@ const AtendimentoScreen: React.FC = () => {
                    </h1>
                    <p className="text-sm text-slate-500 flex items-center gap-2 mt-1">
                      <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs font-bold px-2 py-0.5 rounded-md truncate max-w-xs">
-                        {selectedWhatsapp ? (pessoasMap[selectedWhatsapp.replace(/\D/g, '')] || pessoasMap[selectedWhatsapp] || selectedWhatsapp) : 'Nenhum selecionado'}
+                        {selectedWhatsapp ? (pessoasMap[selectedWhatsapp.replace(/\D/g, '')]?.full_name || pessoasMap[selectedWhatsapp]?.full_name || selectedWhatsapp) : 'Nenhum selecionado'}
                       </span>
                      Acompanhe todas as interações e solicitações.
                    </p>
@@ -556,7 +564,7 @@ const AtendimentoScreen: React.FC = () => {
             
             <div className="p-6">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Mensagem para {selectedWhatsapp ? (pessoasMap[selectedWhatsapp.replace(/\D/g, '')] || pessoasMap[selectedWhatsapp] || selectedWhatsapp) : ''}
+                Mensagem para {selectedWhatsapp ? (pessoasMap[selectedWhatsapp.replace(/\D/g, '')]?.full_name || pessoasMap[selectedWhatsapp]?.full_name || selectedWhatsapp) : ''}
               </label>
               <textarea
                 value={responseText}
@@ -564,6 +572,46 @@ const AtendimentoScreen: React.FC = () => {
                 placeholder="Digite a mensagem..."
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-[#25D366] focus:border-transparent outline-none resize-none h-32 text-slate-900 dark:text-white"
               />
+              
+              {/* Toggle de Atendimento Humano (se cadastrado) */}
+              {selectedWhatsapp && (pessoasMap[selectedWhatsapp.replace(/\D/g, '')] || pessoasMap[selectedWhatsapp]) && (() => {
+                const person = pessoasMap[selectedWhatsapp.replace(/\D/g, '')] || pessoasMap[selectedWhatsapp];
+                return (
+                  <div className="mt-4 flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl">
+                    <div>
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Atendimento Humano</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Pausar respostas da IA para este contato
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={person.atendimento_humano}
+                      onClick={async () => {
+                        const newValue = !person.atendimento_humano;
+                        setPessoasMap(prev => {
+                          const newMap = { ...prev };
+                          const cleanPhone = person.phone.replace(/\D/g, '');
+                          if (newMap[cleanPhone]) newMap[cleanPhone] = { ...newMap[cleanPhone], atendimento_humano: newValue };
+                          if (newMap[person.phone]) newMap[person.phone] = { ...newMap[person.phone], atendimento_humano: newValue };
+                          return newMap;
+                        });
+                        const { error } = await supabase.from('pessoa').update({ atendimento_humano: newValue }).eq('id', person.id);
+                        if (error) {
+                          console.error("Erro ao atualizar atendimento humano:", error);
+                          alert("Não foi possível alterar o status.");
+                        }
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                        person.atendimento_humano ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'
+                      }`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-md ring-0 transition-transform duration-200 ease-in-out ${ person.atendimento_humano ? 'translate-x-5' : 'translate-x-0' }`} />
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
             
             <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">

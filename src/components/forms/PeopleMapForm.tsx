@@ -13,6 +13,17 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// Ícone vermelho customizado para os pinos
+const redIcon = new L.Icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+  iconRetinaUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
 // Componente para ajustar o mapa para caber todos os marcadores
 const MapBounds = ({ markers }: { markers: Pessoa[] }) => {
   const map = useMap();
@@ -90,7 +101,7 @@ const PeopleMapForm: React.FC<PeopleMapFormProps> = ({ onClose, people }) => {
             <MapBounds markers={mappedPeople} />
             
             {mappedPeople.map(p => (
-              <Marker key={p.id} position={[p.latitude!, p.longitude!]}>
+              <Marker key={p.id} position={[p.latitude!, p.longitude!]} icon={redIcon}>
                 <Popup>
                   <div className="font-semibold text-slate-800 uppercase">{p.full_name}</div>
                   <div className="text-xs text-slate-600 mt-1">

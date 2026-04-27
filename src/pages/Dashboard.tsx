@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, CalendarDays, StickyNote, TrendingUp, Calendar, ChevronRight, Loader2, PlusCircle, FileText, ChevronLeft, Clock, MapPin, Bell } from 'lucide-react';
+import { Users, CalendarDays, StickyNote, TrendingUp, Calendar, ChevronRight, Loader2, PlusCircle, FileText, ChevronLeft, Clock, MapPin, Bell, MessageSquare } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -8,7 +8,7 @@ import { AgendaItem } from '../components/forms/AgendaForm';
 interface DashboardStats {
   total: number;
   thisMonth: number;
-  thisWeek: number;
+  messagesToday: number;
   reqCount: number;
 }
 
@@ -56,7 +56,7 @@ const Dashboard: React.FC = () => {
   const canAgenda = hasModule('agenda');
 
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardStats>({ total: 0, thisMonth: 0, thisWeek: 0, reqCount: 0 });
+  const [stats, setStats] = useState<DashboardStats>({ total: 0, thisMonth: 0, messagesToday: 0, reqCount: 0 });
   const [chartData, setChartData] = useState<MonthlyData[]>([]);
   const [weeklyData, setWeeklyData] = useState<MonthlyData[]>([]);
   const [chartView, setChartView] = useState<ChartView>('week');
@@ -78,6 +78,15 @@ const Dashboard: React.FC = () => {
         const { count: reqCount, error: reqError } = await supabase.from('requerimento').select('*', { count: 'exact', head: true });
         if (reqError) throw reqError;
 
+        // Mensagens Hoje Count
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const { count: msgsToday, error: msgsError } = await supabase
+          .from('atendimento')
+          .select('*', { count: 'exact', head: true })
+          .gte('created_at', startOfToday.toISOString());
+        if (msgsError) throw msgsError;
+
         // Agenda Items for the month view
         const firstDayOfMonth = new Date(calYear, calMonth, 1).toISOString();
         const lastDayOfMonth = new Date(calYear, calMonth + 1, 0, 23, 59, 59).toISOString();
@@ -93,7 +102,6 @@ const Dashboard: React.FC = () => {
         const rows = pessoaData || [];
         let total = 0;
         let monthCount = 0;
-        let weekCount = 0;
 
         // Inicia array com os meses do ano zerados
         const monthMap = new Array(12).fill(0);
@@ -119,7 +127,6 @@ const Dashboard: React.FC = () => {
           const d = new Date(p.created_at);
           
           if (isThisMonth(d)) monthCount++;
-          if (isThisWeek(d)) weekCount++;
           
           // Verifica se encaixa nos ultimos 7 dias usando string ISO local
           const pDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -144,7 +151,7 @@ const Dashboard: React.FC = () => {
           count: d.count
         }));
 
-        setStats({ total, thisMonth: monthCount, thisWeek: weekCount, reqCount: reqCount || 0 });
+        setStats({ total, thisMonth: monthCount, messagesToday: msgsToday || 0, reqCount: reqCount || 0 });
         setChartData(aggregatedChart);
         setWeeklyData(aggregatedWeekly);
         setAgendaItems((agendaData ?? []) as AgendaItem[]);
@@ -284,16 +291,16 @@ const Dashboard: React.FC = () => {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-          className="bg-white dark:bg-[#1C2434] rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group hover:border-violet-300 dark:hover:border-violet-700 transition-colors"
+          className="bg-white dark:bg-[#1C2434] rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group hover:border-orange-300 dark:hover:border-orange-700 transition-colors"
         >
           <div className="absolute top-1/2 -translate-y-1/2 -right-4 opacity-5 dark:opacity-10 pointer-events-none group-hover:scale-110 transition-transform duration-300">
-            <TrendingUp size={80} />
+            <MessageSquare size={80} />
           </div>
-          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1 relative z-10">Pessoas nesta Sem.</p>
-          <h3 className="text-4xl font-heading font-bold text-slate-900 dark:text-white mb-2 relative z-10">{stats.thisWeek}</h3>
-          <div className="flex items-center text-[11px] xl:text-xs font-medium text-violet-600 dark:text-violet-400 relative z-10">
-            <TrendingUp className="h-3 w-3 mr-1.5" />
-            <span className="opacity-90">Cadastros nesta semana</span>
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1 relative z-10">Mensagens Hoje</p>
+          <h3 className="text-4xl font-heading font-bold text-slate-900 dark:text-white mb-2 relative z-10">{stats.messagesToday}</h3>
+          <div className="flex items-center text-[11px] xl:text-xs font-medium text-orange-600 dark:text-orange-400 relative z-10">
+            <MessageSquare className="h-3 w-3 mr-1.5" />
+            <span className="opacity-90">Interações via IA (hoje)</span>
           </div>
         </motion.div>
       </div>

@@ -297,31 +297,33 @@ ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
 
 -- pessoa
 CREATE TABLE IF NOT EXISTS public.pessoa (
-  id              uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
-  full_name       text NOT NULL,
-  pronoun         text DEFAULT 'Sr.',
-  address         text,
-  address_number  text,
-  neighborhood    text,
-  city            text,
-  cep             text,
-  latitude        numeric,
-  longitude       numeric,
-  housing_type    text,
-  phone           text,
-  birth_date      date,
-  email           text,
-  cpf             text UNIQUE,
-  cnpj            text UNIQUE,
-  facebook_url    text,
-  instagram_url   text,
-  reference       text,
-  notes           text,
-  destino         text,
-  person_type     text DEFAULT 'Pessoa' CHECK (person_type = ANY (ARRAY['Pessoa','Autoridade','Entidade','Empresa'])),
-  created_at      timestamptz NOT NULL DEFAULT timezone('utc', now()),
-  updated_at      timestamptz NOT NULL DEFAULT timezone('utc', now())
+  id                  uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+  full_name           text NOT NULL,
+  pronoun             text DEFAULT 'Sr.',
+  address             text,
+  address_number      text,
+  neighborhood        text,
+  city                text,
+  cep                 text,
+  latitude            numeric,
+  longitude           numeric,
+  housing_type        text,
+  phone               text,
+  birth_date          date,
+  email               text,
+  cpf                 text UNIQUE,
+  cnpj                text UNIQUE,
+  facebook_url        text,
+  instagram_url       text,
+  reference           text,
+  notes               text,
+  destino             text,
+  person_type         text DEFAULT 'Pessoa' CHECK (person_type = ANY (ARRAY['Pessoa','Autoridade','Entidade','Empresa'])),
+  atendimento_humano  boolean NOT NULL DEFAULT false,
+  created_at          timestamptz NOT NULL DEFAULT timezone('utc', now()),
+  updated_at          timestamptz NOT NULL DEFAULT timezone('utc', now())
 );
+COMMENT ON COLUMN public.pessoa.atendimento_humano IS 'Indica se a pessoa está em atendimento humano (true) ou apenas na IA (false). Nasce sempre false.';
 ALTER TABLE public.pessoa ENABLE ROW LEVEL SECURITY;
 
 -- dependentes

@@ -28,6 +28,7 @@ export interface Pessoa {
   instagram_url: string | null;
   reference: string | null;
   notes: string | null;
+  atendimento_humano: boolean;
   created_at: string;
   updated_at?: string;
 }
@@ -40,7 +41,8 @@ export const DEFAULT_FORM: Partial<Pessoa> = {
   person_type: 'Pessoa', full_name: '', pronoun: 'Sr.', address: '', address_number: '', cep: '', neighborhood: '', city: '',
   latitude: null, longitude: null,
   housing_type: 'Própria', phone: '', destino: '', birth_date: '', email: '',
-  cpf: '', cnpj: '', facebook_url: '', instagram_url: '', reference: '', notes: ''
+  cpf: '', cnpj: '', facebook_url: '', instagram_url: '', reference: '', notes: '',
+  atendimento_humano: false
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -483,6 +485,35 @@ const PeopleForm: React.FC<PeopleFormProps> = ({ initialData, mode, onClose, onS
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Observações Gerais</label>
               <textarea value={form.notes || ''} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500" />
+            </div>
+
+            {/* Toggle — Atendimento Humano */}
+            <div className="col-span-1 md:col-span-12">
+              <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl">
+                <div>
+                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Atendimento Humano</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Indica se esta pessoa está sendo atendida por um humano (desativa a IA)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!form.atendimento_humano}
+                  onClick={() => setForm(prev => ({ ...prev, atendimento_humano: !prev.atendimento_humano }))}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                    form.atendimento_humano
+                      ? 'bg-blue-600'
+                      : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-md ring-0 transition-transform duration-200 ease-in-out ${
+                      form.atendimento_humano ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
