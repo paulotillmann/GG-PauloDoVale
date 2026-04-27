@@ -565,3 +565,28 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.requerimento;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.agenda;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.atendimento;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.anotacoes;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.demandas;
+
+-- demandas
+CREATE TABLE IF NOT EXISTS public.demandas (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  data_demanda date NOT NULL,
+  solicitante text NOT NULL,
+  descricao text NOT NULL,
+  assessor text,
+  status text NOT NULL DEFAULT 'ABERTA' CHECK (status = ANY (ARRAY['ABERTA', 'EM ATENDIMENTO', 'AGUARDANDO RETORNO', 'CONCLUÍDA'])),
+  motivo_retorno text,
+  user_id uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.demandas ENABLE ROW LEVEL SECURITY;
+
+CREATE TRIGGER trg_demandas_updated_at BEFORE UPDATE ON public.demandas FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+CREATE TRIGGER trg_demandas_log AFTER INSERT OR UPDATE OR DELETE ON public.demandas FOR EACH ROW EXECUTE FUNCTION public.fn_log_activity();
+
+CREATE POLICY "demandas_select_authenticated" ON public.demandas FOR SELECT TO authenticated USING (true);
+CREATE POLICY "demandas_insert_authenticated" ON public.demandas FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "demandas_update_authenticated" ON public.demandas FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "demandas_delete_authenticated" ON public.demandas FOR DELETE TO authenticated USING (true);
+

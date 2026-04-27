@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Users, CalendarDays, Laptop, FileText, StickyNote,
   Bell, Moon, Sun, LogOut, Settings,
   Shield, Puzzle, UsersRound, ChevronDown, ChevronRight, ScrollText, Clock,
+  CheckSquare
 } from 'lucide-react';
 import ProfileScreen    from '../pages/ProfileScreen';
 import AccessProfiles   from '../pages/admin/AccessProfiles';
@@ -16,6 +17,7 @@ import PeopleScreen     from '../pages/PeopleScreen';
 import ActivityLogsScreen from '../pages/admin/ActivityLogsScreen';
 import AgendaScreen     from '../pages/AgendaScreen';
 import RequerimentosScreen from '../pages/RequerimentosScreen';
+import DemandasScreen     from '../pages/DemandasScreen';
 import AtendimentoScreen from '../pages/AtendimentoScreen';
 import AnotacoesScreen    from '../pages/AnotacoesScreen';
 
@@ -33,6 +35,7 @@ const ALL_SIDEBAR_ITEMS = [
   { id: 'agenda',           slug: 'agenda',       label: 'Agenda',               icon: CalendarDays },
   { id: 'auto-atendimento', slug: 'atendimentos', label: 'Auto Atendimento',     icon: Laptop },
   { id: 'requerimentos',    slug: 'requerimentos',label: 'Requerimentos',        icon: FileText },
+  { id: 'demandas',         slug: 'demandas',     label: 'Demandas',             icon: CheckSquare },
   { id: 'anotacoes',        slug: 'anotacoes',    label: 'Anotações',            icon: StickyNote },
 ];
 
@@ -64,6 +67,7 @@ const renderContent = (activeMenu: string, children: React.ReactNode) => {
         if (activeMenu === 'anotacoes')        return <AnotacoesScreen />;
         if (activeMenu === 'auto-atendimento') return <AtendimentoScreen />;
         if (activeMenu === 'requerimentos')    return <RequerimentosScreen />;
+        if (activeMenu === 'demandas')         return <DemandasScreen />;
         if (activeMenu === 'config/perfis')    return <AccessProfiles />;
         if (activeMenu === 'config/modulos')   return <ModulesScreen />;
         if (activeMenu === 'config/usuarios')  return <UsersManagement />;
