@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Loader2, CheckCircle, MapPin,
   Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
-  Users, ShieldCheck, Building2, Briefcase, Tag, FileText
+  Users, ShieldCheck, Building2, Briefcase, Tag, FileText, Gift, Send
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { maskPhone } from '../utils/validators';
@@ -50,6 +50,93 @@ const PeopleScreen: React.FC = () => {
     paper: 'a4',
     orientation: 'portrait' as 'portrait' | 'landscape',
   });
+
+  // Birthday Modal state
+  const [showBirthdayModal, setShowBirthdayModal] = useState(false);
+  const [birthdays, setBirthdays] = useState<any[]>([]);
+  const [loadingBirthdays, setLoadingBirthdays] = useState(false);
+  const [wppStatus, setWppStatus] = useState<Record<string, 'loading' | 'success' | 'error'>>({});
+
+  // Cron state
+  const [isAutoEnabled, setIsAutoEnabled] = useState(false);
+  const [autoTime, setAutoTime] = useState('09:00');
+  const [loadingCron, setLoadingCron] = useState(false);
+
+  const fetchBirthdays = async () => {
+    setLoadingBirthdays(true);
+    const { data, error } = await supabase.rpc('get_aniversariantes_hoje');
+    if (!error && data) {
+      setBirthdays(data);
+    }
+    setLoadingBirthdays(false);
+  };
+
+  const fetchCronStatus = async () => {
+    setLoadingCron(true);
+    const { data, error } = await supabase.rpc('get_birthday_cron_status');
+    if (!error && data) {
+      setIsAutoEnabled(data.is_enabled);
+      if (data.schedule) {
+        const parts = data.schedule.split(' ');
+        if (parts.length >= 2) {
+          const m = parts[0].padStart(2, '0');
+          let h = parseInt(parts[1], 10);
+          h = (h - 3 + 24) % 24; // Converte UTC para BRT
+          setAutoTime(`${h.toString().padStart(2, '0')}:${m}`);
+        }
+      }
+    }
+    setLoadingCron(false);
+  };
+
+  const updateCron = async (enabled: boolean, timeStr: string) => {
+    setLoadingCron(true);
+    let schedule = '';
+    if (enabled && timeStr) {
+      const [hStr, mStr] = timeStr.split(':');
+      let h = parseInt(hStr, 10);
+      const m = parseInt(mStr, 10);
+      h = (h + 3) % 24; // Converte BRT para UTC
+      schedule = `${m} ${h} * * *`;
+    }
+    
+    const { error } = await supabase.rpc('update_birthday_cron', {
+      p_is_enabled: enabled,
+      p_cron_schedule: schedule
+    });
+    
+    if (!error) {
+      setIsAutoEnabled(enabled);
+      setAutoTime(timeStr);
+    } else {
+      console.error('Erro ao atualizar cron:', error);
+      alert('Erro ao atualizar agendamento automático.');
+      // Revert state if failed
+      setIsAutoEnabled(!enabled);
+    }
+    setLoadingCron(false);
+  };
+
+  const openBirthdayModal = () => {
+    setShowBirthdayModal(true);
+    fetchBirthdays();
+    fetchCronStatus();
+  };
+
+  const sendBirthdayWpp = async (personId: string) => {
+    setWppStatus(prev => ({ ...prev, [personId]: 'loading' }));
+    try {
+      const { error } = await supabase.functions.invoke('send-birthday-wpp', {
+        body: { targetId: personId }
+      });
+      if (error) throw error;
+      setWppStatus(prev => ({ ...prev, [personId]: 'success' }));
+    } catch (err) {
+      console.error(err);
+      setWppStatus(prev => ({ ...prev, [personId]: 'error' }));
+      alert('Erro ao enviar mensagem via Evolution API.');
+    }
+  };
 
   // ─── Auto-open form check (Vindo do Dashboard) ──────────────────────────────
   useEffect(() => {
@@ -472,6 +559,12 @@ const PeopleScreen: React.FC = () => {
           >
             <MapPin className="h-4 w-4 mr-2" /> Mapa Demográfico
           </button>
+          <button
+            onClick={openBirthdayModal}
+            className="flex items-center px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-sm font-medium transition-colors border border-indigo-200 dark:border-indigo-800/50 shadow-sm"
+          >
+            <Gift className="h-4 w-4 mr-2 text-indigo-600 dark:text-indigo-400" /> Aniversariantes do Dia
+          </button>
 
           <button
             onClick={openCreate}
@@ -870,6 +963,118 @@ const PeopleScreen: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Modal de Aniversariantes */}
+      <AnimatePresence>
+        {showBirthdayModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Gift className="h-5 w-5 text-indigo-600" />
+                  Aniversariantes do Dia
+                </h3>
+                <button onClick={() => setShowBirthdayModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  <Plus className="h-5 w-5 rotate-45" />
+                </button>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 mb-6 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-slate-900 dark:text-white">Envio Automático</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Dispara todos os dias no horário configurado</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="time" 
+                    value={autoTime}
+                    disabled={loadingCron || !isAutoEnabled}
+                    onChange={(e) => {
+                      setAutoTime(e.target.value);
+                      updateCron(isAutoEnabled, e.target.value);
+                    }}
+                    className={`px-2 py-1.5 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-opacity ${
+                      !isAutoEnabled ? 'opacity-50 cursor-not-allowed text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-white'
+                    }`}
+                  />
+                  <button
+                    onClick={() => updateCron(!isAutoEnabled, autoTime)}
+                    disabled={loadingCron}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                      isAutoEnabled ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'
+                    } ${loadingCron ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        isAutoEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                {loadingBirthdays ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" />
+                  </div>
+                ) : birthdays.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+                    Nenhum aniversariante encontrado hoje.
+                  </div>
+                ) : (
+                  birthdays.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800">
+                      <div>
+                        <div className="font-semibold text-slate-900 dark:text-white">{p.full_name}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-1">
+                          <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-slate-700 dark:text-slate-300 font-medium">
+                            {p.tipo}
+                          </span>
+                          {p.phone ? maskPhone(p.phone) : 'Sem número'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => sendBirthdayWpp(p.id)}
+                        disabled={wppStatus[p.id] === 'loading' || wppStatus[p.id] === 'success' || !p.phone}
+                        className={`flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          wppStatus[p.id] === 'success'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 cursor-default'
+                            : !p.phone
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed dark:bg-slate-800'
+                            : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/40 dark:hover:bg-indigo-900/60 dark:text-indigo-300'
+                        }`}
+                      >
+                        {wppStatus[p.id] === 'loading' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : wppStatus[p.id] === 'success' ? (
+                          <>
+                            <CheckCircle className="h-4 w-4 mr-1.5" /> Enviado
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-3.5 w-3.5 mr-1.5" /> Enviar
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button onClick={() => setShowBirthdayModal(false)} className="px-4 py-2 text-sm font-medium border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
