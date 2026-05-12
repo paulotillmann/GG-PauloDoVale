@@ -32,6 +32,7 @@ export interface Profile {
   created_at: string;
   updated_at: string;
   theme?: 'light' | 'dark';
+  receber_lembrete_agenda?: boolean;
   roles?: Role | null;
 }
 

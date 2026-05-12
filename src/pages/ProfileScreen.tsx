@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Calendar, Shield, Camera, Edit2, Loader2, Check } from 'lucide-react';
+import { User, Mail, Phone, Calendar, Shield, Camera, Edit2, Loader2, Check, Bell } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -278,6 +278,40 @@ const ProfileScreen: React.FC = () => {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Notificações */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Notificações</h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-4">
+                  <div className={`mt-0.5 p-2 rounded-lg ${profile?.receber_lembrete_agenda ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400' : 'bg-slate-50 dark:bg-slate-800 text-slate-400 dark:text-slate-600'}`}>
+                    <Bell className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">Lembretes de Agenda</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Receber lembretes via WhatsApp 30 min antes dos compromissos
+                    </p>
+                  </div>
+                </div>
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                  profile?.receber_lembrete_agenda
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                }`}>
+                  {profile?.receber_lembrete_agenda ? 'Ativo' : 'Inativo'}
+                </span>
+              </div>
+              {!profile?.receber_lembrete_agenda && (
+                <p className="text-xs text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 rounded-lg">
+                  💡 Entre em contato com o administrador para ativar os lembretes de agenda.
+                </p>
+              )}
             </div>
           </div>
 

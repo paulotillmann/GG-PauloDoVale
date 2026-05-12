@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   UsersRound, Search, ChevronDown, Loader2, X, CheckCircle,
-  Mail, Phone, Calendar, Shield,
+  Mail, Phone, Calendar, Shield, Bell,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,6 +16,7 @@ interface UserProfile {
   telefone: string | null;
   role: string;
   role_id: string | null;
+  receber_lembrete_agenda: boolean;
   created_at: string;
   roles: { id: string; name: string; slug: string } | null;
 }
@@ -44,13 +45,14 @@ const maskPhone = (p: string) => {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const UsersManagement: React.FC = () => {
-  const { user: me } = useAuth();
+  const { user: me, refreshProfile } = useAuth();
   const [users, setUsers]       = useState<UserProfile[]>([]);
   const [roles, setRoles]       = useState<Role[]>([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState('');
   const [selected, setSelected] = useState<UserProfile | null>(null);
   const [newRoleId, setNewRoleId] = useState('');
+  const [newLembrete, setNewLembrete] = useState(false);
   const [saving, setSaving]     = useState(false);
   const [successId, setSuccessId] = useState<string | null>(null);
 
@@ -60,6 +62,7 @@ const UsersManagement: React.FC = () => {
     const [{ data: profiles }, { data: rls }] = await Promise.all([
       supabase.from('profiles').select('*, roles(id, name, slug)').order('full_name'),
       supabase.from('roles').select('id, name, slug').order('name'),
+
     ]);
     setUsers((profiles ?? []) as UserProfile[]);
     setRoles(rls ?? []);
@@ -82,6 +85,7 @@ const UsersManagement: React.FC = () => {
   const openUser = (u: UserProfile) => {
     setSelected(u);
     setNewRoleId(u.role_id ?? '');
+    setNewLembrete(u.receber_lembrete_agenda ?? false);
   };
 
   const handleSaveRole = async () => {
@@ -91,14 +95,21 @@ const UsersManagement: React.FC = () => {
     await supabase.from('profiles').update({
       role_id: newRoleId || null,
       role: role?.slug === 'admin' ? 'admin' : 'colaborador',
+      receber_lembrete_agenda: newLembrete,
       updated_at: new Date().toISOString(),
     }).eq('id', selected.id);
 
     setUsers(prev => prev.map(u =>
       u.id === selected.id
-        ? { ...u, role_id: newRoleId, role: role?.slug === 'admin' ? 'admin' : 'colaborador', roles: role ?? null }
+        ? { ...u, role_id: newRoleId, role: role?.slug === 'admin' ? 'admin' : 'colaborador', roles: role ?? null, receber_lembrete_agenda: newLembrete }
         : u
     ));
+    
+    // Atualiza o contexto global de auth se for o usuário logado
+    if (selected.id === me?.id) {
+      await refreshProfile();
+    }
+    
     setSaving(false);
     setSuccessId(selected.id);
     setSelected(null);
@@ -180,10 +191,13 @@ const UsersManagement: React.FC = () => {
                         className="h-9 w-9 rounded-full bg-slate-100 dark:bg-slate-700 object-cover shrink-0"
                       />
                       <div>
-                        <p className="text-sm font-medium text-slate-900 dark:text-white">
+                        <p className="text-sm font-medium text-slate-900 dark:text-white flex items-center gap-1.5">
                           {u.full_name ?? 'Sem nome'}
+                          {u.receber_lembrete_agenda && (
+                            <Bell className="h-3.5 w-3.5 text-amber-500" title="Recebe lembretes de agenda" />
+                          )}
                           {u.id === me?.id && (
-                            <span className="ml-2 text-xs text-blue-500">(você)</span>
+                            <span className="ml-1 text-xs text-blue-500">(você)</span>
                           )}
                         </p>
                       </div>
@@ -293,6 +307,31 @@ const UsersManagement: React.FC = () => {
                       <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Toggle lembrete de agenda */}
+                <div>
+                  <label className="flex items-center justify-between cursor-pointer select-none">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Receber Lembretes de Agenda</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">WhatsApp com antecedência de 30 min</p>
+                    </div>
+                    <div
+                      onClick={() => setNewLembrete(!newLembrete)}
+                      className={`relative w-11 h-6 rounded-full transition-colors duration-200 shrink-0 ml-3 ${
+                        newLembrete ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+                        newLembrete ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </div>
+                  </label>
+                  {newLembrete && !selected?.telefone && (
+                    <p className="mt-2 text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-1.5 rounded-lg">
+                      ⚠️ Este usuário não possui telefone cadastrado. O lembrete não será enviado.
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex gap-3 pt-2">
