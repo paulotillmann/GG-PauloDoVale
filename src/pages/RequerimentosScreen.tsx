@@ -18,6 +18,9 @@ import RequerimentoForm, {
 import {
   fetchAllBubbleRequerimentos, mapBubbleRequerimento, downloadAndUploadPdf, SyncResult,
 } from '../services/bubbleApi';
+import {
+  fetchAllSaplRequerimentos, mapSaplToRequerimento, fetchSaplDocumentosAcessorios,
+} from '../services/saplApi';
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -62,12 +65,21 @@ const RequerimentosScreen: React.FC = () => {
   const [viewArquivos, setViewArquivos]           = useState<ArquivoReq[]>([]);
   const [loadingArquivos, setLoadingArquivos]     = useState(false);
   const [deletingArquivoId, setDeletingArquivoId] = useState<string | null>(null);
+  const [viewArquivosFilter, setViewArquivosFilter] = useState<'all' | 'anexos' | 'oficios'>('all');
   
   // Visualizar titulo
   const [viewTituloItem, setViewTituloItem]   = useState<Requerimento | null>(null);
 
   // Mapa de contagem de arquivos por requerimento_id
-  const [arquivosCount, setArquivosCount] = useState<Record<string, number>>({});
+  const [arquivosCount, setArquivosCount] = useState<Record<string, { anexos: number; oficios: number }>>({});
+
+  // ── SAPL Sync State ─────────────────────────────────────────────────────
+  const [showSaplModal, setShowSaplModal] = useState(false);
+  const [saplLoading, setSaplLoading] = useState(false);
+  const [saplProgress, setSaplProgress] = useState<{ fetched: number; total: number; acessorios: number }>({ fetched: 0, total: 0, acessorios: 0 });
+  const [saplResult, setSaplResult] = useState<{ total: number; inserted: number; skipped: number; errors: number; oficios: number } | null>(null);
+  const [saplError, setSaplError] = useState<string | null>(null);
+  const [saplPhase, setSaplPhase] = useState<'idle' | 'fetching' | 'acessorios' | 'done'>('idle');
 
   // ── Bubble Sync State ─────────────────────────────────────────────────────
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -95,15 +107,21 @@ const RequerimentosScreen: React.FC = () => {
   // ── Fetch ───────────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [{ data }, { data: counts }] = await Promise.all([
+    const [{ data }, { data: files }] = await Promise.all([
       supabase.from('requerimento').select('*, pessoa(full_name)').order('data_sessao', { ascending: false }),
-      supabase.from('requerimento_arquivos').select('requerimento_id'),
+      supabase.from('requerimento_arquivos').select('requerimento_id, nome_arquivo'),
     ]);
     setItems((data ?? []) as Requerimento[]);
     // montar mapa de contagem
-    const cmap: Record<string, number> = {};
-    for (const row of (counts ?? [])) {
-      cmap[row.requerimento_id] = (cmap[row.requerimento_id] ?? 0) + 1;
+    const cmap: Record<string, { anexos: number; oficios: number }> = {};
+    for (const row of (files ?? [])) {
+      if (!cmap[row.requerimento_id]) cmap[row.requerimento_id] = { anexos: 0, oficios: 0 };
+      const nome = (row.nome_arquivo || '').toLowerCase();
+      if (nome.includes('ofício') || nome.includes('oficio')) {
+        cmap[row.requerimento_id].oficios++;
+      } else {
+        cmap[row.requerimento_id].anexos++;
+      }
     }
     setArquivosCount(cmap);
     setLoading(false);
@@ -234,8 +252,9 @@ const RequerimentosScreen: React.FC = () => {
     setUploadProgress('');
   };
 
-  const openViewArquivos = async (item: Requerimento) => {
+  const openViewArquivos = async (item: Requerimento, filter: 'all' | 'anexos' | 'oficios' = 'all') => {
     setViewArquivosItem(item);
+    setViewArquivosFilter(filter);
     setLoadingArquivos(true);
     const { data } = await supabase
       .from('requerimento_arquivos')
@@ -246,7 +265,7 @@ const RequerimentosScreen: React.FC = () => {
     setLoadingArquivos(false);
   };
 
-  const handleDeleteArquivo = async (arquivoId: string, arquivoUrl: string) => {
+  const handleDeleteArquivo = async (arquivoId: string, arquivoUrl: string, nomeArquivo: string) => {
     setDeletingArquivoId(arquivoId);
     // Extrair path relativo da URL pública
     const url = new URL(arquivoUrl);
@@ -259,10 +278,17 @@ const RequerimentosScreen: React.FC = () => {
     setViewArquivos(prev => prev.filter(a => a.id !== arquivoId));
     // atualizar contador no grid
     if (viewArquivosItem) {
-      setArquivosCount(prev => ({
-        ...prev,
-        [viewArquivosItem.id]: Math.max(0, (prev[viewArquivosItem.id] ?? 1) - 1),
-      }));
+      const isOficio = (nomeArquivo || '').toLowerCase().includes('ofício') || (nomeArquivo || '').toLowerCase().includes('oficio');
+      setArquivosCount(prev => {
+        const current = prev[viewArquivosItem.id] ?? { anexos: 0, oficios: 0 };
+        return {
+          ...prev,
+          [viewArquivosItem.id]: {
+            anexos: isOficio ? current.anexos : Math.max(0, current.anexos - 1),
+            oficios: isOficio ? Math.max(0, current.oficios - 1) : current.oficios,
+          }
+        };
+      });
     }
   };
 
@@ -304,7 +330,13 @@ const RequerimentosScreen: React.FC = () => {
     // atualizar contagem
     if (inserted.length > 0) {
       const reqId = uploadItem.id;
-      setArquivosCount(prev => ({ ...prev, [reqId]: (prev[reqId] ?? 0) + inserted.length }));
+      setArquivosCount(prev => {
+        const current = prev[reqId] ?? { anexos: 0, oficios: 0 };
+        return {
+          ...prev,
+          [reqId]: { ...current, anexos: current.anexos + inserted.length }
+        };
+      });
       showSuccess(`${inserted.length} arquivo(s) importado(s) com sucesso!`);
     }
   };
@@ -425,6 +457,128 @@ const RequerimentosScreen: React.FC = () => {
     }
   };
 
+  const syncFromSapl = async () => {
+    setSaplLoading(true);
+    setSaplResult(null);
+    setSaplError(null);
+    setSaplProgress({ fetched: 0, total: 0, acessorios: 0 });
+    setSaplPhase('fetching');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id ?? null;
+      if (!userId) throw new Error('Usuário não autenticado. Faça login e tente novamente.');
+
+      const { data: existing } = await supabase
+        .from('requerimento')
+        .select('numero_requerimento, id')
+        .like('informacoes_adicionais', 'Importado do SAPL%');
+      
+      const existingMap = new Map((existing ?? []).map((r: any) => [r.numero_requerimento, r.id]));
+
+      const saplMaterias = await fetchAllSaplRequerimentos((fetched, total) => {
+        setSaplProgress(p => ({ ...p, fetched, total }));
+      });
+
+      const result = {
+        total: saplMaterias.length,
+        inserted: 0,
+        skipped: 0,
+        errors: 0,
+        oficios: 0,
+      };
+
+      setSaplPhase('acessorios');
+      let acessoriosCount = 0;
+
+      for (const sapl of saplMaterias) {
+        const numFormatado = `${String(sapl.numero).padStart(3, '0')}/${sapl.ano}`;
+        let reqId = existingMap.get(numFormatado);
+
+        if (!reqId) {
+          const mapped = mapSaplToRequerimento(sapl, userId);
+          const { data: insertedReq, error: insertErr } = await supabase
+            .from('requerimento')
+            .insert(mapped)
+            .select('id')
+            .single();
+
+          if (insertErr || !insertedReq) {
+            console.error('[SAPL Sync] Erro ao inserir matéria:', insertErr?.message);
+            result.errors++;
+            continue;
+          }
+          reqId = insertedReq.id;
+          result.inserted++;
+        } else {
+          result.skipped++;
+        }
+
+        // Buscar arquivos já existentes para este requerimento
+        const { data: existingFiles } = await supabase
+          .from('requerimento_arquivos')
+          .select('arquivo_url')
+          .eq('requerimento_id', reqId);
+          
+        const existingUrls = new Set((existingFiles ?? []).map(f => f.arquivo_url));
+
+        // 1) Importar o texto_original (PDF do requerimento) como Anexo
+        if (sapl.texto_original && !existingUrls.has(sapl.texto_original)) {
+          const nomeAnexo = `Requerimento ${String(sapl.numero).padStart(3, '0')}-${sapl.ano}.pdf`;
+          await supabase.from('requerimento_arquivos').insert({
+            requerimento_id: reqId,
+            nome_arquivo: nomeAnexo,
+            arquivo_url: sapl.texto_original,
+            tamanho_bytes: null,
+          });
+          acessoriosCount++;
+          setSaplProgress(p => ({ ...p, acessorios: acessoriosCount }));
+          existingUrls.add(sapl.texto_original);
+        }
+
+        // 2) Buscar documentos acessórios (ofícios, respostas, etc.)
+        const docs = await fetchSaplDocumentosAcessorios(sapl.id);
+
+        let hasResposta = false;
+
+        for (const doc of docs) {
+          const nomeLower = doc.nome.toLowerCase();
+          const isOficioExecutivo = nomeLower.includes('oficio executivo') || nomeLower.includes('ofício executivo') || nomeLower.includes('prefeito') || nomeLower.includes('resposta');
+          
+          if (isOficioExecutivo) hasResposta = true;
+          
+          if ((isOficioExecutivo || doc.arquivo) && !existingUrls.has(doc.arquivo)) {
+            await supabase.from('requerimento_arquivos').insert({
+              requerimento_id: reqId,
+              nome_arquivo: doc.nome + '.pdf',
+              arquivo_url: doc.arquivo,
+              tamanho_bytes: null,
+            });
+            if (isOficioExecutivo) result.oficios++;
+            acessoriosCount++;
+            setSaplProgress(p => ({ ...p, acessorios: acessoriosCount }));
+            existingUrls.add(doc.arquivo);
+          }
+        }
+
+        if (hasResposta) {
+          await supabase.from('requerimento').update({
+            status: 'Respondido',
+            resposta_recebida: 'Sim'
+          }).eq('id', reqId);
+        }
+      }
+
+      setSaplPhase('done');
+      setSaplResult(result);
+      if (result.inserted > 0 || result.oficios > 0) fetchData();
+    } catch (err: unknown) {
+      setSaplError(err instanceof Error ? err.message : 'Erro ao sincronizar SAPL.');
+    } finally {
+      setSaplLoading(false);
+    }
+  };
+
   const generatePDF = () => {
 
     const doc = new jsPDF('landscape');
@@ -499,6 +653,13 @@ const RequerimentosScreen: React.FC = () => {
           >
             <Printer className="h-4 w-4 sm:mr-2 text-slate-500" /> 
             <span className="hidden sm:inline">PDF</span>
+          </button>
+          <button
+            onClick={() => setShowSaplModal(true)}
+            className="flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+          >
+            <CloudDownload className="h-4 w-4 sm:mr-2" /> 
+            <span className="hidden sm:inline">Importar SAPL</span>
           </button>
           <button
             onClick={fetchData}
@@ -702,7 +863,10 @@ const RequerimentosScreen: React.FC = () => {
                     </th>
                   ))}
                   <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide w-16">
-                    Anexo
+                    Anexos
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide w-16">
+                    Ofícios
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">
                     Ações
@@ -768,16 +932,30 @@ const RequerimentosScreen: React.FC = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-700 dark:text-slate-300">
                       {fmtDate(item.created_at?.split('T')[0])}
                     </td>
-                    {/* Coluna Anexo PDF */}
+                    {/* Colunas de Arquivos */}
                     <td className="px-4 py-3 text-center">
-                      {(arquivosCount[item.id] ?? 0) > 0 ? (
+                      {(arquivosCount[item.id]?.anexos ?? 0) > 0 ? (
                         <button
-                          onClick={() => openViewArquivos(item)}
-                          title={`${arquivosCount[item.id]} arquivo(s) anexado(s)`}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                          onClick={() => openViewArquivos(item, 'anexos')}
+                          title={`${arquivosCount[item.id].anexos} anexo(s)`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                         >
                           <Paperclip className="h-4 w-4" />
-                          <span className="text-xs font-bold">{arquivosCount[item.id]}</span>
+                          <span className="text-xs font-bold">{arquivosCount[item.id].anexos}</span>
+                        </button>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-700 text-xs select-none">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {(arquivosCount[item.id]?.oficios ?? 0) > 0 ? (
+                        <button
+                          onClick={() => openViewArquivos(item, 'oficios')}
+                          title={`${arquivosCount[item.id].oficios} ofício(s)`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                        >
+                          <FileText className="h-4 w-4" />
+                          <span className="text-xs font-bold">{arquivosCount[item.id].oficios}</span>
                         </button>
                       ) : (
                         <span className="text-slate-300 dark:text-slate-700 text-xs select-none">—</span>
@@ -940,10 +1118,44 @@ const RequerimentosScreen: React.FC = () => {
               ) : viewArquivos.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-8">Nenhum arquivo encontrado.</p>
               ) : (
-                <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {viewArquivos.map(arq => (
+                <>
+                  {/* Tabs */}
+                  <div className="flex items-center gap-2 mb-4 p-1 bg-slate-100 dark:bg-slate-900/50 rounded-lg">
+                    <button
+                      onClick={() => setViewArquivosFilter('all')}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${viewArquivosFilter === 'all' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    >
+                      Todos
+                    </button>
+                    <button
+                      onClick={() => setViewArquivosFilter('anexos')}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${viewArquivosFilter === 'anexos' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    >
+                      Anexos
+                    </button>
+                    <button
+                      onClick={() => setViewArquivosFilter('oficios')}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${viewArquivosFilter === 'oficios' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    >
+                      Ofícios
+                    </button>
+                  </div>
+
+                  <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {viewArquivos.filter(arq => {
+                      const isOficio = (arq.nome_arquivo || '').toLowerCase().includes('ofício') || (arq.nome_arquivo || '').toLowerCase().includes('oficio');
+                      if (viewArquivosFilter === 'anexos') return !isOficio;
+                      if (viewArquivosFilter === 'oficios') return isOficio;
+                      return true;
+                    }).map(arq => {
+                      const isOficio = (arq.nome_arquivo || '').toLowerCase().includes('ofício') || (arq.nome_arquivo || '').toLowerCase().includes('oficio');
+                      return (
                     <li key={arq.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
-                      <FileText className="h-5 w-5 text-red-500 shrink-0" />
+                      {isOficio ? (
+                        <FileText className="h-5 w-5 text-blue-500 shrink-0" />
+                      ) : (
+                        <FileText className="h-5 w-5 text-red-500 shrink-0" />
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{arq.nome_arquivo}</p>
                         {arq.tamanho_bytes && (
@@ -955,7 +1167,7 @@ const RequerimentosScreen: React.FC = () => {
                         <ExternalLink className="h-4 w-4" />
                       </a>
                       <button
-                        onClick={() => handleDeleteArquivo(arq.id, arq.arquivo_url)}
+                        onClick={() => handleDeleteArquivo(arq.id, arq.arquivo_url, arq.nome_arquivo)}
                         disabled={deletingArquivoId === arq.id}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                         title="Remover arquivo"
@@ -963,8 +1175,9 @@ const RequerimentosScreen: React.FC = () => {
                         {deletingArquivoId === arq.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </button>
                     </li>
-                  ))}
+                  )})}
                 </ul>
+                </>
               )}
               <div className="flex justify-end mt-5">
                 <button
@@ -974,6 +1187,117 @@ const RequerimentosScreen: React.FC = () => {
                   <Upload className="h-4 w-4" /> Adicionar mais arquivos
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Sincronização SAPL */}
+      <AnimatePresence>
+        {showSaplModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            onClick={() => !saplLoading && setShowSaplModal(false)}>
+            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }}
+              className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-md w-full shadow-xl"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-3 mb-5">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
+                  <CloudDownload className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-heading font-bold text-slate-900 dark:text-white">Sincronização SAPL</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Importar requerimentos do portal legislativo</p>
+                </div>
+              </div>
+
+              {!saplResult && !saplLoading && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700 rounded-xl space-y-2">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">Esta ação irá:</p>
+                    <ul className="text-sm text-slate-500 dark:text-slate-400 space-y-1.5 list-disc pl-4">
+                      <li>Buscar todos os requerimentos do seu perfil no SAPL.</li>
+                      <li>Baixar os anexos e ofícios de cada matéria.</li>
+                      <li>Ignorar requerimentos que já foram importados.</li>
+                      <li>Requerimentos com ofícios do executivo serão marcados como Respondidos.</li>
+                    </ul>
+                  </div>
+                  {saplError && (
+                    <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <p className="text-sm text-red-700 dark:text-red-400">{saplError}</p>
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-3 mt-6">
+                    <button onClick={() => setShowSaplModal(false)}
+                      className="px-4 py-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm font-medium transition-colors">
+                      Cancelar
+                    </button>
+                    <button onClick={syncFromSapl}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm">
+                      Iniciar Importação
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {saplLoading && (
+                <div className="py-6 flex flex-col items-center justify-center text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400 mb-4" />
+                  <h4 className="text-slate-900 dark:text-white font-semibold">Sincronizando com SAPL...</h4>
+                  {saplPhase === 'fetching' && (
+                    <p className="text-sm text-slate-500 mt-1">
+                      Buscando página... ({saplProgress.fetched} de {saplProgress.total || '?'})
+                    </p>
+                  )}
+                  {saplPhase === 'acessorios' && (
+                    <p className="text-sm text-slate-500 mt-1">
+                      Baixando anexos e ofícios... ({saplProgress.acessorios} encontrados)
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-400 mt-4 max-w-xs">
+                    Por favor, não feche esta janela. Esta operação pode demorar alguns minutos.
+                  </p>
+                </div>
+              )}
+
+              {saplResult && (
+                <div className="space-y-4">
+                  <div className="flex flex-col items-center text-center p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-4">
+                    <CheckCircle2 className="h-8 w-8 text-emerald-500 mb-2" />
+                    <h4 className="text-emerald-800 dark:text-emerald-400 font-bold">Sincronização Concluída!</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-center">
+                      <span className="block text-2xl font-bold text-slate-700 dark:text-slate-300">{saplResult.total}</span>
+                      <span className="text-xs text-slate-500 uppercase tracking-wide">Lidos no SAPL</span>
+                    </div>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-center">
+                      <span className="block text-2xl font-bold text-blue-600 dark:text-blue-400">{saplResult.inserted}</span>
+                      <span className="text-xs text-blue-600/70 uppercase tracking-wide">Novos</span>
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-center">
+                      <span className="block text-2xl font-bold text-slate-500">{saplResult.skipped}</span>
+                      <span className="text-xs text-slate-400 uppercase tracking-wide">Já Existentes</span>
+                    </div>
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl text-center">
+                      <span className="block text-2xl font-bold text-emerald-600 dark:text-emerald-400">{saplResult.oficios}</span>
+                      <span className="text-xs text-emerald-600/70 uppercase tracking-wide">Ofícios PDF</span>
+                    </div>
+                  </div>
+                  {saplResult.errors > 0 && (
+                    <p className="text-xs text-red-500 text-center flex items-center justify-center gap-1">
+                      <AlertCircle className="h-3.5 w-3.5" /> {saplResult.errors} registro(s) com erro.
+                    </p>
+                  )}
+                  <div className="flex justify-end mt-4">
+                    <button onClick={() => setShowSaplModal(false)}
+                      className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors">
+                      Fechar
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
