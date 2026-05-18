@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Loader2, CheckCircle, MapPin,
   Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
-  Users, ShieldCheck, Building2, Briefcase, Tag, FileText, Gift, Send
+  Users, ShieldCheck, Building2, Briefcase, Tag, FileText, Gift, Send, Printer
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { maskPhone } from '../utils/validators';
+import { maskPhone, maskCPF, maskCNPJ } from '../utils/validators';
 import PeopleForm, { Pessoa, PERSON_TYPES } from '../components/forms/PeopleForm';
 import PeopleMapForm from '../components/forms/PeopleMapForm';
 import jsPDF from 'jspdf';
@@ -421,6 +421,615 @@ const PeopleScreen: React.FC = () => {
     setShowLabelModal(false);
   };
 
+  const printFicha = async (person: Pessoa) => {
+    const formatDate = (ds?: string | null) => {
+      if (!ds) return '';
+      const parts = ds.split('-');
+      return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : ds;
+    };
+
+    const telefones = [person.phone ? maskPhone(person.phone) : null, person.telefone_extra ? maskPhone(person.telefone_extra) : null].filter(Boolean).join(' / ');
+    
+    let addressLine = person.address || '';
+    if (person.address_number) addressLine += `, ${person.address_number}`;
+    if (person.neighborhood) addressLine += ` - ${person.neighborhood}`;
+    if (person.city) addressLine += ` - ${person.city}`;
+    if (person.cep) addressLine += ` (CEP: ${person.cep})`;
+
+    // Buscar dependentes e serviços
+    const [{ data: dependentesData }, { data: servicosData }] = await Promise.all([
+      supabase.from('dependentes').select('*').eq('pessoa_id', person.id).order('created_at', { ascending: true }),
+      supabase.from('servicos').select('*').eq('pessoa_id', person.id).order('service_date', { ascending: false })
+    ]);
+
+    const dependentes = dependentesData || [];
+    const servicos = servicosData || [];
+
+    let dependentesHtml = '';
+    if (dependentes.length > 0) {
+      dependentesHtml = `
+        <div class="section">
+          <div class="section-title">Dependentes</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Nome Completo</th>
+                <th>Data Nasc.</th>
+                <th>Parentesco</th>
+                <th>Telefone</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${dependentes.map(dep => `
+                <tr>
+                  <td>${dep.full_name}</td>
+                  <td>${formatDate(dep.birth_date) || '—'}</td>
+                  <td>${dep.kinship || '—'}</td>
+                  <td>${dep.phone ? maskPhone(dep.phone) : '—'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    let servicosHtml = '';
+    if (servicos.length > 0) {
+      servicosHtml = `
+        <div class="section">
+          <div class="section-title">Serviços e Atendimentos</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Atendido?</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${servicos.map(serv => `
+                <tr>
+                  <td>${formatDate(serv.service_date) || '—'}</td>
+                  <td>${serv.description || '—'}</td>
+                  <td>${serv.is_attended ? 'Sim' : 'Não'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8" />
+          <title>Ficha Cadastral - ${person.full_name}</title>
+          <style>
+            @page { margin: 15mm; }
+            body { 
+              font-family: Arial, sans-serif; 
+              color: #333; 
+              margin: 0; 
+              padding: 0; 
+              font-size: 12px;
+            }
+            .container {
+              border: 2px solid #000;
+              padding: 20px;
+              border-radius: 8px;
+              max-width: 800px;
+              margin: 0 auto;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #000;
+              padding-bottom: 15px;
+              margin-bottom: 20px;
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 20px;
+              text-transform: uppercase;
+            }
+            .header p {
+              margin: 5px 0 0;
+              font-size: 12px;
+              color: #555;
+            }
+            .section {
+              margin-bottom: 15px;
+            }
+            .section-title {
+              background: #f4f4f4;
+              font-weight: bold;
+              padding: 6px 10px;
+              border: 1px solid #000;
+              border-radius: 4px;
+              margin-bottom: 10px;
+              text-transform: uppercase;
+              font-size: 11px;
+            }
+            .row {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 15px;
+              margin-bottom: 10px;
+            }
+            .field {
+              flex: 1;
+              min-width: 200px;
+            }
+            .label {
+              font-weight: bold;
+              font-size: 10px;
+              color: #666;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .value {
+              font-size: 13px;
+              border-bottom: 1px solid #ccc;
+              padding-bottom: 2px;
+              min-height: 18px;
+            }
+            .full-width {
+              flex: 1 1 100%;
+            }
+            .data-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 5px;
+            }
+            .data-table th, .data-table td {
+              border: 1px solid #ccc;
+              padding: 6px 8px;
+              text-align: left;
+              font-size: 12px;
+            }
+            .data-table th {
+              background-color: #f9f9f9;
+              font-weight: bold;
+            }
+            @media print {
+              .container { border: none; padding: 0; max-width: 100%; }
+            }
+          </style>
+        </head>
+        <body onload="window.print()">
+          <div class="container">
+            <div class="header">
+              <h1>Ficha Cadastral</h1>
+              <p>Gabinete - Cadastro Geral</p>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Dados Principais</div>
+              <div class="row">
+                <div class="field full-width">
+                  <div class="label">Nome Completo / Razão Social</div>
+                  <div class="value">${person.full_name || ''}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field">
+                  <div class="label">Tipo</div>
+                  <div class="value">${person.person_type || 'Pessoa'}</div>
+                </div>
+                <div class="field">
+                  <div class="label">Tratamento</div>
+                  <div class="value">${person.pronoun || ''}</div>
+                </div>
+                <div class="field">
+                  <div class="label">Nascimento</div>
+                  <div class="value">${formatDate(person.birth_date) || ''}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field">
+                  <div class="label">CPF</div>
+                  <div class="value">${person.cpf ? maskCPF(person.cpf) : ''}</div>
+                </div>
+                <div class="field">
+                  <div class="label">CNPJ</div>
+                  <div class="value">${person.cnpj ? maskCNPJ(person.cnpj) : ''}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Contato e Localidade</div>
+              <div class="row">
+                <div class="field full-width">
+                  <div class="label">Endereço Completo</div>
+                  <div class="value">${addressLine || ''}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field">
+                  <div class="label">Telefones</div>
+                  <div class="value">${telefones || ''}</div>
+                </div>
+                <div class="field">
+                  <div class="label">E-mail</div>
+                  <div class="value">${person.email || ''}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field">
+                  <div class="label">Destino</div>
+                  <div class="value">${person.destino || ''}</div>
+                </div>
+                <div class="field">
+                  <div class="label">Ponto de Referência</div>
+                  <div class="value">${person.reference || ''}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Redes Sociais e Observações</div>
+              <div class="row">
+                <div class="field">
+                  <div class="label">Instagram</div>
+                  <div class="value">${person.instagram_url || ''}</div>
+                </div>
+                <div class="field">
+                  <div class="label">Facebook</div>
+                  <div class="value">${person.facebook_url || ''}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field full-width">
+                  <div class="label">Observações</div>
+                  <div class="value" style="min-height: 50px;">${person.notes || ''}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field">
+                  <div class="label">Cadastrado Por</div>
+                  <div class="value">${person.profiles?.full_name || ''}</div>
+                </div>
+                <div class="field">
+                  <div class="label">Data de Cadastro</div>
+                  <div class="value">${formatDate(person.created_at?.split('T')[0]) || ''}</div>
+                </div>
+              </div>
+            </div>
+            
+            ${dependentesHtml}
+            ${servicosHtml}
+
+          </div>
+        </body>
+      </html>
+    `;
+    
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+
+  const [printingSelected, setPrintingSelected] = useState(false);
+
+  const printSelectedFichas = async () => {
+    if (selectedIds.length === 0) return;
+    setPrintingSelected(true);
+    
+    // Pegar as pessoas selecionadas da lista 'people'
+    const selectedPeople = people.filter(p => selectedIds.includes(p.id));
+    
+    // Para cada pessoa selecionada, buscar dependentes e serviços
+    const fullPeopleData = await Promise.all(selectedPeople.map(async (person) => {
+      const [{ data: dependentesData }, { data: servicosData }] = await Promise.all([
+        supabase.from('dependentes').select('*').eq('pessoa_id', person.id).order('created_at', { ascending: true }),
+        supabase.from('servicos').select('*').eq('pessoa_id', person.id).order('service_date', { ascending: false })
+      ]);
+      return { person, dependentes: dependentesData || [], servicos: servicosData || [] };
+    }));
+
+    const formatDate = (ds?: string | null) => {
+      if (!ds) return '';
+      const parts = ds.split('-');
+      return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : ds;
+    };
+
+    let allFichasHtml = '';
+
+    fullPeopleData.forEach(({ person, dependentes, servicos }, index) => {
+      const telefones = [person.phone ? maskPhone(person.phone) : null, person.telefone_extra ? maskPhone(person.telefone_extra) : null].filter(Boolean).join(' / ');
+      
+      let addressLine = person.address || '';
+      if (person.address_number) addressLine += `, ${person.address_number}`;
+      if (person.neighborhood) addressLine += ` - ${person.neighborhood}`;
+      if (person.city) addressLine += ` - ${person.city}`;
+      if (person.cep) addressLine += ` (CEP: ${person.cep})`;
+
+      let dependentesHtml = '';
+      if (dependentes.length > 0) {
+        dependentesHtml = `
+          <div class="section">
+            <div class="section-title">Dependentes</div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Nome Completo</th>
+                  <th>Data Nasc.</th>
+                  <th>Parentesco</th>
+                  <th>Telefone</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${dependentes.map((dep: any) => `
+                  <tr>
+                    <td>${dep.full_name}</td>
+                    <td>${formatDate(dep.birth_date) || '—'}</td>
+                    <td>${dep.kinship || '—'}</td>
+                    <td>${dep.phone ? maskPhone(dep.phone) : '—'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      let servicosHtml = '';
+      if (servicos.length > 0) {
+        servicosHtml = `
+          <div class="section">
+            <div class="section-title">Serviços e Atendimentos</div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Descrição</th>
+                  <th>Atendido?</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${servicos.map((serv: any) => `
+                  <tr>
+                    <td>${formatDate(serv.service_date) || '—'}</td>
+                    <td>${serv.description || '—'}</td>
+                    <td>${serv.is_attended ? 'Sim' : 'Não'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      const pageBreak = index < fullPeopleData.length - 1 ? '<div class="page-break"></div>' : '';
+
+      allFichasHtml += `
+        <div class="ficha-container">
+          <div class="header">
+            <h1>Ficha Cadastral</h1>
+            <p>Gabinete - Cadastro Geral</p>
+          </div>
+          
+          <div class="section">
+            <div class="section-title">Dados Principais</div>
+            <div class="row">
+              <div class="field full-width">
+                <div class="label">Nome Completo / Razão Social</div>
+                <div class="value">${person.full_name || ''}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <div class="label">Tipo</div>
+                <div class="value">${person.person_type || 'Pessoa'}</div>
+              </div>
+              <div class="field">
+                <div class="label">Tratamento</div>
+                <div class="value">${person.pronoun || ''}</div>
+              </div>
+              <div class="field">
+                <div class="label">Nascimento</div>
+                <div class="value">${formatDate(person.birth_date) || ''}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <div class="label">CPF</div>
+                <div class="value">${person.cpf ? maskCPF(person.cpf) : ''}</div>
+              </div>
+              <div class="field">
+                <div class="label">CNPJ</div>
+                <div class="value">${person.cnpj ? maskCNPJ(person.cnpj) : ''}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Contato e Localidade</div>
+            <div class="row">
+              <div class="field full-width">
+                <div class="label">Endereço Completo</div>
+                <div class="value">${addressLine || ''}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <div class="label">Telefones</div>
+                <div class="value">${telefones || ''}</div>
+              </div>
+              <div class="field">
+                <div class="label">E-mail</div>
+                <div class="value">${person.email || ''}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <div class="label">Destino</div>
+                <div class="value">${person.destino || ''}</div>
+              </div>
+              <div class="field">
+                <div class="label">Ponto de Referência</div>
+                <div class="value">${person.reference || ''}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Redes Sociais e Observações</div>
+            <div class="row">
+              <div class="field">
+                <div class="label">Instagram</div>
+                <div class="value">${person.instagram_url || ''}</div>
+              </div>
+              <div class="field">
+                <div class="label">Facebook</div>
+                <div class="value">${person.facebook_url || ''}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field full-width">
+                <div class="label">Observações</div>
+                <div class="value" style="min-height: 50px;">${person.notes || ''}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <div class="label">Cadastrado Por</div>
+                <div class="value">${person.profiles?.full_name || ''}</div>
+              </div>
+              <div class="field">
+                <div class="label">Data de Cadastro</div>
+                <div class="value">${formatDate(person.created_at?.split('T')[0]) || ''}</div>
+              </div>
+            </div>
+          </div>
+          
+          ${dependentesHtml}
+          ${servicosHtml}
+        </div>
+        ${pageBreak}
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8" />
+          <title>Fichas Cadastrais - Lote</title>
+          <style>
+            @page { margin: 15mm; }
+            body { 
+              font-family: Arial, sans-serif; 
+              color: #333; 
+              margin: 0; 
+              padding: 0; 
+              font-size: 12px;
+              background-color: #f0f0f0;
+            }
+            .ficha-container {
+              border: 2px solid #000;
+              padding: 20px;
+              border-radius: 8px;
+              max-width: 800px;
+              margin: 20px auto;
+              background-color: #fff;
+              box-sizing: border-box;
+            }
+            .page-break {
+              page-break-after: always;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #000;
+              padding-bottom: 15px;
+              margin-bottom: 20px;
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 20px;
+              text-transform: uppercase;
+            }
+            .header p {
+              margin: 5px 0 0;
+              font-size: 12px;
+              color: #555;
+            }
+            .section {
+              margin-bottom: 15px;
+            }
+            .section-title {
+              background: #f4f4f4;
+              font-weight: bold;
+              padding: 6px 10px;
+              border: 1px solid #000;
+              border-radius: 4px;
+              margin-bottom: 10px;
+              text-transform: uppercase;
+              font-size: 11px;
+            }
+            .row {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 15px;
+              margin-bottom: 10px;
+            }
+            .field {
+              flex: 1;
+              min-width: 200px;
+            }
+            .label {
+              font-weight: bold;
+              font-size: 10px;
+              color: #666;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .value {
+              font-size: 13px;
+              border-bottom: 1px solid #ccc;
+              padding-bottom: 2px;
+              min-height: 18px;
+            }
+            .full-width {
+              flex: 1 1 100%;
+            }
+            .data-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 5px;
+            }
+            .data-table th, .data-table td {
+              border: 1px solid #ccc;
+              padding: 6px 8px;
+              text-align: left;
+              font-size: 12px;
+            }
+            .data-table th {
+              background-color: #f9f9f9;
+              font-weight: bold;
+            }
+            @media print {
+              body { background-color: #fff; margin: 0; }
+              .ficha-container { border: none; padding: 0; margin: 0; max-width: 100%; }
+              .page-break { margin-bottom: 0; }
+            }
+          </style>
+        </head>
+        <body onload="window.print()">
+          ${allFichasHtml}
+        </body>
+      </html>
+    `;
+    
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setPrintingSelected(false);
+  };
+
   const generateReport = () => {
     if (sorted.length === 0) {
       alert("Nenhum registro encontrado para gerar o relatório.");
@@ -541,6 +1150,21 @@ const PeopleScreen: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {selectedIds.length > 0 && (
+            <button
+              onClick={printSelectedFichas}
+              disabled={printingSelected}
+              className="flex items-center px-4 py-2.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800 shadow-sm"
+            >
+              {printingSelected ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Printer className="h-4 w-4 mr-2" />
+              )}
+              {printingSelected ? 'Gerando Fichas...' : `Imprimir Selecionados (${selectedIds.length})`}
+            </button>
+          )}
+
           <button
             onClick={generateReport}
             className="flex items-center px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-200 dark:border-slate-700 shadow-sm"
@@ -771,6 +1395,13 @@ const PeopleScreen: React.FC = () => {
                       {formatDate(p.birth_date)}
                     </td>
                     <td className="py-4 px-6 text-right space-x-2">
+                       <button
+                         onClick={() => printFicha(p)}
+                         className="inline-flex items-center justify-center px-3 py-1.5 h-8 border border-slate-200 dark:border-slate-700/60 rounded text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors mr-1"
+                         title="Imprimir Ficha"
+                       >
+                         <Printer className="h-3.5 w-3.5 mr-1.5" /> Ficha
+                       </button>
                        <button
                          onClick={() => openEdit(p)}
                          className="inline-flex items-center justify-center px-3 py-1.5 h-8 border border-slate-200 dark:border-slate-700/60 rounded text-xs font-semibold text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors mr-1"

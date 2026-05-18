@@ -4,7 +4,7 @@ import {
   FileText, Plus, Loader2, CheckCircle,
   Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
   CheckCircle2, XCircle, FilePlus2, Clock3, AlertCircle,
-  Search, Filter, X, RefreshCw, Printer, Upload, Paperclip, ExternalLink, CloudDownload
+  Search, Filter, X, RefreshCw, Printer, Upload, Paperclip, ExternalLink, CloudDownload, DatabaseBackup, Clock
 } from 'lucide-react';
 
 
@@ -21,6 +21,7 @@ import {
 import {
   fetchAllSaplRequerimentos, mapSaplToRequerimento, fetchSaplDocumentosAcessorios,
 } from '../services/saplApi';
+import SaplHistoryModal from '../components/SaplHistoryModal';
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -80,6 +81,8 @@ const RequerimentosScreen: React.FC = () => {
   const [saplResult, setSaplResult] = useState<{ total: number; inserted: number; skipped: number; errors: number; oficios: number } | null>(null);
   const [saplError, setSaplError] = useState<string | null>(null);
   const [saplPhase, setSaplPhase] = useState<'idle' | 'fetching' | 'acessorios' | 'done'>('idle');
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyModalReqId, setHistoryModalReqId] = useState<string | null>(null);
 
   // ── Bubble Sync State ─────────────────────────────────────────────────────
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -491,17 +494,84 @@ const RequerimentosScreen: React.FC = () => {
       setSaplPhase('acessorios');
       let acessoriosCount = 0;
 
+      const historicoLogs: any[] = [];
+      const { data: fullExisting } = await supabase.from('requerimento').select('*');
+      const fullExistingMap = new Map((fullExisting ?? []).map((r: any) => [r.numero_requerimento, r]));
+
       for (const sapl of saplMaterias) {
         const numFormatado = `${String(sapl.numero).padStart(3, '0')}/${sapl.ano}`;
-        let reqId = existingMap.get(numFormatado);
+        const existingRecord = fullExistingMap.get(numFormatado);
+        let reqId = existingRecord?.id;
+        
+        const mapped = mapSaplToRequerimento(sapl, userId);
+        let novoStatus = mapped.status;
+        let novaResposta = mapped.resposta_recebida;
+        let hasResposta = false;
 
-        if (!reqId) {
-          const mapped = mapSaplToRequerimento(sapl, userId);
-          const { data: insertedReq, error: insertErr } = await supabase
-            .from('requerimento')
-            .insert(mapped)
-            .select('id')
-            .single();
+        // Pré-fetch Docs
+        const docs = await fetchSaplDocumentosAcessorios(sapl.id);
+        const novosArquivos: any[] = [];
+        
+        if (sapl.texto_original) {
+          const url = sapl.texto_original;
+          novosArquivos.push({ nome: `Requerimento ${String(sapl.numero).padStart(3, '0')}-${sapl.ano}.pdf`, url, fromDocs: false });
+        }
+        
+        for (const doc of docs) {
+          if (!doc.arquivo) continue;
+          novosArquivos.push({ nome: doc.nome + '.pdf', url: doc.arquivo, fromDocs: true });
+          const nomeLower = doc.nome.toLowerCase();
+          if (nomeLower.includes('oficio executivo') || nomeLower.includes('ofício executivo') || nomeLower.includes('prefeito') || nomeLower.includes('resposta')) {
+            hasResposta = true;
+          }
+        }
+
+        if (hasResposta) {
+          novoStatus = 'Respondido';
+          novaResposta = 'Sim';
+        }
+
+        if (existingRecord) {
+          // UPDATE
+          const updatePayload: any = {
+            titulo: mapped.titulo,
+            data_sessao: mapped.data_sessao,
+            status: novoStatus,
+            resposta_recebida: novaResposta,
+            informacoes_adicionais: mapped.informacoes_adicionais
+          };
+
+          const diff: any = {};
+          let changed = false;
+          Object.keys(updatePayload).forEach(key => {
+            if (String(existingRecord[key] || '') !== String(updatePayload[key] || '')) {
+              diff[key] = { antigo: existingRecord[key], novo: updatePayload[key] };
+              changed = true;
+            }
+          });
+
+          if (changed) {
+            const { error: updErr } = await supabase.from('requerimento').update(updatePayload).eq('id', reqId);
+            if (!updErr) {
+              result.updated = (result.updated || 0) + 1;
+              historicoLogs.push({
+                requerimento_id: reqId,
+                entidade_tipo: 'Requerimento',
+                entidade_identificador: numFormatado,
+                acao: 'ATUALIZADO',
+                detalhes_alteracao: diff,
+                user_id: userId
+              });
+            } else {
+              result.errors++;
+            }
+          } else {
+            result.skipped++;
+          }
+        } else {
+          // INSERT
+          const insertPayload = { ...mapped, status: novoStatus, resposta_recebida: novaResposta };
+          const { data: insertedReq, error: insertErr } = await supabase.from('requerimento').insert(insertPayload).select('id').single();
 
           if (insertErr || !insertedReq) {
             console.error('[SAPL Sync] Erro ao inserir matéria:', insertErr?.message);
@@ -510,68 +580,55 @@ const RequerimentosScreen: React.FC = () => {
           }
           reqId = insertedReq.id;
           result.inserted++;
-        } else {
-          result.skipped++;
-        }
-
-        // Buscar arquivos já existentes para este requerimento
-        const { data: existingFiles } = await supabase
-          .from('requerimento_arquivos')
-          .select('arquivo_url')
-          .eq('requerimento_id', reqId);
           
-        const existingUrls = new Set((existingFiles ?? []).map(f => f.arquivo_url));
-
-        // 1) Importar o texto_original (PDF do requerimento) como Anexo
-        if (sapl.texto_original && !existingUrls.has(sapl.texto_original)) {
-          const nomeAnexo = `Requerimento ${String(sapl.numero).padStart(3, '0')}-${sapl.ano}.pdf`;
-          await supabase.from('requerimento_arquivos').insert({
+          historicoLogs.push({
             requerimento_id: reqId,
-            nome_arquivo: nomeAnexo,
-            arquivo_url: sapl.texto_original,
-            tamanho_bytes: null,
+            entidade_tipo: 'Requerimento',
+            entidade_identificador: numFormatado,
+            acao: 'CRIADO',
+            detalhes_alteracao: { novo_registro: insertPayload.titulo },
+            user_id: userId
           });
-          acessoriosCount++;
-          setSaplProgress(p => ({ ...p, acessorios: acessoriosCount }));
-          existingUrls.add(sapl.texto_original);
         }
 
-        // 2) Buscar documentos acessórios (ofícios, respostas, etc.)
-        const docs = await fetchSaplDocumentosAcessorios(sapl.id);
+        // Verifica arquivos
+        if (reqId && novosArquivos.length > 0) {
+          const { data: existingFiles } = await supabase.from('requerimento_arquivos').select('arquivo_url').eq('requerimento_id', reqId);
+          const existingUrls = new Set((existingFiles ?? []).map(f => f.arquivo_url));
 
-        let hasResposta = false;
-
-        for (const doc of docs) {
-          const nomeLower = doc.nome.toLowerCase();
-          const isOficioExecutivo = nomeLower.includes('oficio executivo') || nomeLower.includes('ofício executivo') || nomeLower.includes('prefeito') || nomeLower.includes('resposta');
-          
-          if (isOficioExecutivo) hasResposta = true;
-          
-          if ((isOficioExecutivo || doc.arquivo) && !existingUrls.has(doc.arquivo)) {
-            await supabase.from('requerimento_arquivos').insert({
-              requerimento_id: reqId,
-              nome_arquivo: doc.nome + '.pdf',
-              arquivo_url: doc.arquivo,
-              tamanho_bytes: null,
-            });
-            if (isOficioExecutivo) result.oficios++;
-            acessoriosCount++;
-            setSaplProgress(p => ({ ...p, acessorios: acessoriosCount }));
-            existingUrls.add(doc.arquivo);
+          for (const arq of novosArquivos) {
+            if (!existingUrls.has(arq.url)) {
+              await supabase.from('requerimento_arquivos').insert({
+                requerimento_id: reqId,
+                nome_arquivo: arq.nome,
+                arquivo_url: arq.url,
+                tamanho_bytes: null,
+              });
+              if (arq.fromDocs) result.oficios++;
+              acessoriosCount++;
+              setSaplProgress(p => ({ ...p, acessorios: acessoriosCount }));
+              
+              historicoLogs.push({
+                requerimento_id: reqId,
+                entidade_tipo: 'Arquivo/Ofício',
+                entidade_identificador: arq.nome,
+                acao: 'CRIADO',
+                detalhes_alteracao: { arquivo: arq.nome },
+                user_id: userId
+              });
+              existingUrls.add(arq.url);
+            }
           }
         }
+      }
 
-        if (hasResposta) {
-          await supabase.from('requerimento').update({
-            status: 'Respondido',
-            resposta_recebida: 'Sim'
-          }).eq('id', reqId);
-        }
+      if (historicoLogs.length > 0) {
+        await supabase.from('sapl_sincronismo_historico').insert(historicoLogs);
       }
 
       setSaplPhase('done');
       setSaplResult(result);
-      if (result.inserted > 0 || result.oficios > 0) fetchData();
+      if (result.inserted > 0 || result.oficios > 0 || historicoLogs.length > 0) fetchData();
     } catch (err: unknown) {
       setSaplError(err instanceof Error ? err.message : 'Erro ao sincronizar SAPL.');
     } finally {
@@ -654,6 +711,14 @@ const RequerimentosScreen: React.FC = () => {
             <Printer className="h-4 w-4 sm:mr-2 text-slate-500" /> 
             <span className="hidden sm:inline">PDF</span>
           </button>
+          <button
+            onClick={() => { setHistoryModalReqId(null); setShowHistoryModal(true); }}
+            className="flex items-center px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+          >
+            <DatabaseBackup className="h-4 w-4 sm:mr-2" /> 
+            <span className="hidden sm:inline">Histórico SAPL</span>
+          </button>
+          
           <button
             onClick={() => setShowSaplModal(true)}
             className="flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
@@ -963,6 +1028,13 @@ const RequerimentosScreen: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => { setHistoryModalReqId(item.id); setShowHistoryModal(true); }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+                          title="Histórico de Sincronismo"
+                        >
+                          <Clock className="h-4 w-4" />
+                        </button>
                         {/* Importar PDF(s) */}
                         <button
                           onClick={() => openUpload(item)}
@@ -1568,6 +1640,12 @@ const RequerimentosScreen: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Modal: Histórico */}
+      <SaplHistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        requerimentoId={historyModalReqId}
+      />
     </div>
   );
 };
